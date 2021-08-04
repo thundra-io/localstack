@@ -18,11 +18,15 @@ from localstack.constants import (
     THUNDRA_APIKEY,
     THUNDRA_APIKEY_ENV_VAR_NAME,
     THUNDRA_JAVA_AGENT_JAR_NAME,
+    THUNDRA_AGENT_LAMBDA_HANDLER_VAR_NAME,
+    THUNDRA_AGENT_DOTNET_CORE_HANDLER,
 )
 from localstack.services.awslambda.lambda_utils import (
     LAMBDA_RUNTIME_JAVA8,
     LAMBDA_RUNTIME_JAVA11,
     LAMBDA_RUNTIME_PROVIDED,
+    LAMBDA_RUNTIME_DOTNETCORE21,
+    LAMBDA_RUNTIME_DOTNETCORE31
 )
 from localstack.services.install import INSTALL_PATH_LOCALSTACK_FAT_JAR
 from localstack.utils import bootstrap
@@ -101,6 +105,11 @@ def get_from_event(event, key):
         return event["Records"][0][key]
     except KeyError:
         return None
+
+
+def is_dotnet_core_lambda(lambda_details):
+    runtime = getattr(lambda_details, "runtime", lambda_details)
+    return runtime in [LAMBDA_RUNTIME_DOTNETCORE21, LAMBDA_RUNTIME_DOTNETCORE31]
 
 
 def is_java_lambda(lambda_details):
@@ -500,6 +509,13 @@ class LambdaExecutorContainers(LambdaExecutor):
         # accept any self-signed certificates for outgoing calls from the Lambda
         if is_nodejs_runtime(runtime):
             environment["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
+
+        if is_dotnet_core_lambda(runtime):
+            # If runtime is dotnet core, change original handler with thundra handler
+            if THUNDRA_AGENT_DOTNET_CORE_HANDLER != handler:
+                func_details.handler = THUNDRA_AGENT_DOTNET_CORE_HANDLER
+                environment[LAMBDA_HANDLER_ENV_VAR_NAME] = THUNDRA_AGENT_DOTNET_CORE_HANDLER
+                environment[THUNDRA_AGENT_LAMBDA_HANDLER_VAR_NAME] = handler
 
         # run Lambda executor and fetch invocation result
         LOG.info("Running lambda: %s" % func_details.arn())

@@ -33,6 +33,9 @@ THUNDRA_APIKEY_ENV_VAR_NAME = "THUNDRA_APIKEY"
 THUNDRA_APIKEY = os.getenv(THUNDRA_APIKEY_ENV_VAR_NAME)
 THUNDRA_JAVA_AGENT_JAR_NAME = "thundra-agent.jar"
 THUNDRA_JAVA_AGENT_VERSION = os.getenv("THUNDRA_AGENT_VERSION", "LATEST")
+THUNDRA_AGENT_LAMBDA_HANDLER_VAR_NAME = "thundra_agent_lambda_handler"
+THUNDRA_AGENT_DOTNET_CORE_HANDLER = "Thundra.Agent::Thundra.Agent.Lambda.Core.ThundraProxy::Handle"
+
 
 # map of default service APIs and ports to be spun up (fetch map from localstack_client)
 DEFAULT_SERVICE_PORTS = localstack_client.config.get_service_ports()
