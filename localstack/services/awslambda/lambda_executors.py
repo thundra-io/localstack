@@ -451,6 +451,17 @@ class LambdaExecutorContainers(LambdaExecutor):
         # Mount Thundra agent jar into container file system
         return "-v %s:%s" % (THUNDRA_JAVA_AGENT_JAR, THUNDRA_JAVA_AGENT_CONTAINER_PATH)
 
+    def inject_thundra_dotnetcore_agent(self, environment, func_details, handler):
+        thundra_apikey = super(LambdaExecutorContainers, self)._get_thundra_apikey(environment)
+        if not thundra_apikey:
+            return
+
+        # change original handler with thundra handler
+        if THUNDRA_AGENT_DOTNET_CORE_HANDLER != handler:
+            func_details.handler = THUNDRA_AGENT_DOTNET_CORE_HANDLER
+            environment[LAMBDA_HANDLER_ENV_VAR_NAME] = THUNDRA_AGENT_DOTNET_CORE_HANDLER
+            environment[THUNDRA_AGENT_LAMBDA_HANDLER_VAR_NAME] = handler
+
     def _execute(self, func_arn, func_details, event, context=None, version=None):
         runtime = func_details.runtime
         handler = func_details.handler
@@ -511,11 +522,7 @@ class LambdaExecutorContainers(LambdaExecutor):
             environment["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
 
         if is_dotnet_core_lambda(runtime):
-            # If runtime is dotnet core, change original handler with thundra handler
-            if THUNDRA_AGENT_DOTNET_CORE_HANDLER != handler:
-                func_details.handler = THUNDRA_AGENT_DOTNET_CORE_HANDLER
-                environment[LAMBDA_HANDLER_ENV_VAR_NAME] = THUNDRA_AGENT_DOTNET_CORE_HANDLER
-                environment[THUNDRA_AGENT_LAMBDA_HANDLER_VAR_NAME] = handler
+            self.inject_thundra_dotnetcore_agent(environment, func_details, handler)
 
         # run Lambda executor and fetch invocation result
         LOG.info("Running lambda: %s" % func_details.arn())
