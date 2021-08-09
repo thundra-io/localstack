@@ -522,6 +522,8 @@ class LambdaExecutorContainers(LambdaExecutor):
             environment["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
 
         if is_dotnet_core_lambda(runtime):
+            dotnetpath = '/private/var/folders/v4/h_0l3z_s6p1_g_l89j0x5flc0000gq/T/localstack/Thundra.Agent.dll'
+            docker_flags += " -v %s:%s" % (dotnetpath, "/var/task/Thundra.Agent.dll")
             self.inject_thundra_dotnetcore_agent(environment, func_details, handler)
 
         # run Lambda executor and fetch invocation result
@@ -905,6 +907,9 @@ class LambdaExecutorLocal(LambdaExecutor):
         :param func_details: function details
         :return: the InvocationResult
         """
+        print("****************************************")
+        print("_execute_in_custom_runtime")
+        print("****************************************")
 
         env_vars = func_details and func_details.envvars
         kwargs = {"stdin": True, "inherit_env": True, "asynchronous": True, "env_vars": env_vars}
@@ -955,6 +960,9 @@ class LambdaExecutorLocal(LambdaExecutor):
     def _execute(
         self, func_arn, func_details, event, context=None, version=None
     ) -> InvocationResult:
+        print("****************************************")
+        print("_execute_in_custom_runtime22")
+        print("****************************************")
         lambda_cwd = func_details.cwd
         environment = self._prepare_environment(func_details)
 
