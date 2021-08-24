@@ -265,7 +265,7 @@ LAMBDA_EXECUTOR = os.environ.get("LAMBDA_EXECUTOR", "").strip()
 if not LAMBDA_EXECUTOR:
     LAMBDA_EXECUTOR = "docker"
     if not has_docker():
-        LAMBDA_EXECUTOR = "local"
+        LAMBDA_EXECUTOR = "remote"
 
 # Fallback URL to use when a non-existing Lambda is invoked. If this matches
 # `dynamodb://<table_name>`, then the invocation is recorded in the corresponding

@@ -1014,6 +1014,72 @@ class LambdaExecutorLocal(LambdaExecutor):
                 os.environ.pop(env_name, None)
 
 
+class LambdaExecutorRemote(LambdaExecutor):
+
+    def _execute(
+        self, func_arn, func_details, event, context=None, version=None
+    ) -> InvocationResult:
+        import json
+        import requests
+        import datetime
+
+        start_time = now(millis=True)
+        request_id = long_uid()
+        result = None
+        error = None
+
+        def default_serializer(o):
+            if isinstance(o, (datetime.date, datetime.datetime)):
+                return o.isoformat()
+
+        with CaptureOutput() as c:
+            try:
+
+                invocation_data = json.dumps({
+                    "arn": func_arn,
+                    "handler": func_details.handler,
+                    "version": version,
+                    "role": func_details.role,
+                    "envVars": func_details.envvars,
+                    "timeout": func_details.timeout,
+                    "memorySize": func_details.memory_size,
+                    "event": event,
+                }, default=default_serializer)
+                r = requests.post('http://localhost:8080/invocation/' + request_id, data=invocation_data)
+                result = r.text
+            except Exception as e:
+                error = e
+        end_time = now(millis=True)
+
+        # Make sure to keep the log line below, to ensure the log stream gets created
+        log_output = 'START %s: Lambda %s started via "remote" executor ...' % (
+            request_id,
+            func_arn,
+        )
+        # TODO: Interweaving stdout/stderr currently not supported
+        for stream in (c.stdout(), c.stderr()):
+            if stream:
+                log_output += ("\n" if log_output else "") + stream
+        log_output += "\nEND RequestId: %s" % request_id
+        log_output += "\nREPORT RequestId: %s Duration: %s ms" % (
+            request_id,
+            int((end_time - start_time) * 1000),
+        )
+
+        # store logs to CloudWatch
+        #_store_logs(func_details, log_output)
+
+        if error:
+            LOG.info(
+                'Error executing Lambda "%s": %s %s'
+                % (func_arn, error, "".join(traceback.format_tb(error.__traceback__)))
+            )
+            raise InvocationException(result, log_output)
+
+        invocation_result = InvocationResult(result, log_output=log_output)
+        return invocation_result
+
+
 class Util:
     debug_java_port = False
 
@@ -1106,12 +1172,14 @@ class Util:
 # --------------
 
 EXECUTOR_LOCAL = LambdaExecutorLocal()
+EXECUTOR_REMOTE = LambdaExecutorRemote()
 EXECUTOR_CONTAINERS_SEPARATE = LambdaExecutorSeparateContainers()
 EXECUTOR_CONTAINERS_REUSE = LambdaExecutorReuseContainers()
 DEFAULT_EXECUTOR = EXECUTOR_CONTAINERS_SEPARATE
 # the keys of AVAILABLE_EXECUTORS map to the LAMBDA_EXECUTOR config variable
 AVAILABLE_EXECUTORS = {
     "local": EXECUTOR_LOCAL,
+    "remote": EXECUTOR_REMOTE,
     "docker": EXECUTOR_CONTAINERS_SEPARATE,
     "docker-reuse": EXECUTOR_CONTAINERS_REUSE,
 }

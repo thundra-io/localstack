@@ -132,6 +132,7 @@ IAM_POLICY_VERSION = "2012-10-17"
 # Whether to check if the handler function exists while creating lambda function
 CHECK_HANDLER_ON_CREATION = False
 
+NOT_AVAILABLE = "N/A"
 
 class LambdaRegion(RegionBackend):
     def __init__(self):
@@ -950,8 +951,11 @@ def set_function_code(code, lambda_name, lambda_cwd=None):
         lambda_handler = do_set_function_code(code, lambda_name, lambda_cwd=lambda_cwd)
         add_function_mapping(lambda_name, lambda_handler, lambda_cwd)
 
-    # unzipping can take some time - limit the execution time to avoid client/network timeout issues
-    run_for_max_seconds(25, _set_and_configure)
+    # Skip getting function code if S3 bucket is marked as not available
+    if not code.get("S3Bucket") == NOT_AVAILABLE:
+        # unzipping can take some time - limit the execution time to avoid client/network timeout issues
+        run_for_max_seconds(25, _set_and_configure)
+
     return {"FunctionName": lambda_name}
 
 
