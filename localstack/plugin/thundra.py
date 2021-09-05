@@ -10,7 +10,7 @@ from localstack.services.awslambda.lambda_executors import (
     LambdaExecutorPlugin,
     is_java_lambda,
 )
-from localstack.services.awslambda.lambda_utils import LAMBDA_RUNTIME_JAVA8
+from localstack.services.awslambda.lambda_utils import LAMBDA_RUNTIME_JAVA8, LAMBDA_RUNTIME_DOTNETCORE31
 
 
 def get_latest_java_agent_version(metadata_url):
@@ -36,11 +36,16 @@ LOG = logging.getLogger(__name__)
 THUNDRA_APIKEY_ENV_VAR_NAME = "THUNDRA_APIKEY"
 THUNDRA_AGENT_LOG_DISABLE_VAR_NAME = "THUNDRA_AGENT_LAMBDA_LOG_DISABLE"
 THUNDRA_APIKEY = os.getenv(THUNDRA_APIKEY_ENV_VAR_NAME)
+THUNDRA_AGENT_LAMBDA_HANDLER_VAR_NAME = "THUNDRA_AGENT_LAMBDA_HANDLER"
+LAMBDA_HANDLER_ENV_VAR_NAME = "_HANDLER"
 
 # Java related constants
 THUNDRA_JAVA_AGENT_INITIALIZED = False
 THUNDRA_JAVA_AGENT_REMOTE_URL = None
 THUNDRA_JAVA_AGENT_LOCAL_PATH = None
+
+# dotnetcore related constants
+THUNDRA_AGENT_DOTNET_CORE_HANDLER = "Thundra.Agent::Thundra.Agent.Lambda.Core.ThundraProxy::Handle"
 
 
 def _get_apikey(env_vars):
@@ -98,6 +103,11 @@ def _is_java8_lambda(func_details):
     return runtime == LAMBDA_RUNTIME_JAVA8
 
 
+def is_dotnet_core_lambda(func_details):
+    runtime = getattr(func_details, "runtime", func_details)
+    return runtime == LAMBDA_RUNTIME_DOTNETCORE31
+
+
 class LambdaExecutorPluginThundra(LambdaExecutorPlugin):
     def initialize(self):
         # If Thundra API key is initialized, init at startup
@@ -105,8 +115,10 @@ class LambdaExecutorPluginThundra(LambdaExecutorPlugin):
             _ensure_java_agent_initialized()
 
     def should_apply(self, context: InvocationContext) -> bool:
-        # plugin currently only applied for Java Lambdas, if LAMBDA_REMOTE_DOCKER=0, and if API key is configured
-        if not is_java_lambda(context.lambda_function.runtime):
+        # plugin currently only applied for Java and dotnetcore Lambdas,
+        # if LAMBDA_REMOTE_DOCKER=0, and if API key is configured
+        if not (is_java_lambda(context.lambda_function.runtime) or
+                is_dotnet_core_lambda(context.lambda_function.runtime)):
             return False
         if "docker" in config.LAMBDA_EXECUTOR and config.LAMBDA_REMOTE_DOCKER:
             return False
@@ -118,10 +130,47 @@ class LambdaExecutorPluginThundra(LambdaExecutorPlugin):
     def prepare_invocation(
         self, context: InvocationContext
     ) -> Optional[AdditionalInvocationOptions]:
+
+        result = AdditionalInvocationOptions()
+        environment = context.environment
+
+        # Disable CDS (Class Data Sharing),
+        # because "-javaagent" cannot be enabled when CDS is enabled on JDK 8.
+        # CDS can only be disabled by "_JAVA_OPTIONS" env var,
+        # because by default it is enabled ("-Xshare:on")
+        # on Lambci by command line parameters and
+        # "_JAVA_OPTIONS" has precedence over command line parameters
+        # but "JAVA_TOOL_OPTIONS" is not.
+        if _is_java8_lambda(context.lambda_function):
+            self.prepare_invocation_for_java(context, result)
+
+        if is_dotnet_core_lambda(context.lambda_function):
+            self.prepare_invocation_for_dotnetcore(context, result)
+
+        # If log disable is not configured explicitly, set it to false to enable log capturing by default
+        log_disabled = environment.get(THUNDRA_AGENT_LOG_DISABLE_VAR_NAME)
+        if not log_disabled:
+            result.env_updates[THUNDRA_AGENT_LOG_DISABLE_VAR_NAME] = "false"
+
+        # make sure API key is contained in environment
+        result.env_updates[THUNDRA_APIKEY_ENV_VAR_NAME] = _get_apikey(environment)
+
+        return result
+
+    def prepare_invocation_for_dotnetcore(
+        self, context: InvocationContext, result: AdditionalInvocationOptions
+    ) -> Optional[AdditionalInvocationOptions]:
+        if THUNDRA_AGENT_LAMBDA_HANDLER_VAR_NAME in context.environment:
+            assembly_name = context.environment[THUNDRA_AGENT_LAMBDA_HANDLER_VAR_NAME].split("::")[0]
+            context.environment["DOTNET_ADDITIONAL_DEPS"] = "/var/task/" + assembly_name + ".deps.json"
+        return result
+
+    def prepare_invocation_for_java(
+        self, context: InvocationContext, result: AdditionalInvocationOptions
+    ) -> Optional[AdditionalInvocationOptions]:
         # download and initialize Java agent
         _ensure_java_agent_initialized()
 
-        result = AdditionalInvocationOptions()
         environment = context.environment
         agent_flag = "-javaagent:{agent_path}"
 
@@ -139,18 +188,9 @@ class LambdaExecutorPluginThundra(LambdaExecutorPlugin):
         # on Lambci by command line parameters and
         # "_JAVA_OPTIONS" has precedence over command line parameters
         # but "JAVA_TOOL_OPTIONS" is not.
-        if _is_java8_lambda(context.lambda_function):
-            java_opts = environment.get("_JAVA_OPTIONS", "")
-            java_opts += " -Xshare:off"
-            result.env_updates["_JAVA_OPTIONS"] = java_opts.strip()
-
-        # If log disable is not configured explicitly, set it to false to enable log capturing by default
-        log_disabled = environment.get(THUNDRA_AGENT_LOG_DISABLE_VAR_NAME)
-        if not log_disabled:
-            result.env_updates[THUNDRA_AGENT_LOG_DISABLE_VAR_NAME] = "false"
-
-        # make sure API key is contained in environment
-        result.env_updates[THUNDRA_APIKEY_ENV_VAR_NAME] = _get_apikey(environment)
+        java_opts = environment.get("_JAVA_OPTIONS", "")
+        java_opts += " -Xshare:off"
+        result.env_updates["_JAVA_OPTIONS"] = java_opts.strip()
 
         # Note: The code below doesn't seem to be required, as LAMBDA_EXECUTOR=local also picks up $JAVA_TOOL_OPTIONS
         # if context.lambda_command:
